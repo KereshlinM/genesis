@@ -97,8 +97,8 @@ async def run_simulation(config: dict, progress_cb=None) -> dict:
                     agent_idx=i,
                     genome=genomes[i],
                     culture=cultures[int(culture_ids[i])],
-                    baseline=baselines[i] if baseline_counts[i] >= 2 else None,
-                    baseline_std=baseline_stds[i] if baseline_counts[i] >= 2 else None,
+                    baseline=baselines[i] if baseline_counts[i] >= 4 else None,
+                    baseline_std=baseline_stds[i] if baseline_counts[i] >= 4 else None,
                     sessions=sessions,
                     time_pressure=time_pressure,
                     rng=rng,
@@ -124,11 +124,12 @@ async def run_simulation(config: dict, progress_cb=None) -> dict:
                 urgency   = res.get("urgency_score", 0.0)
 
                 # Update rolling baseline (exponential moving average)
+                # alpha=0.12: slower adaptation so drift stays detectable as genomes evolve
                 if baseline_counts[i] == 0:
                     baselines[i] = metrics
                     baseline_stds[i] = np.full(N_METRICS, 0.1, dtype=np.float32)
                 else:
-                    alpha = 0.2
+                    alpha = 0.12
                     diff = metrics - baselines[i]
                     baselines[i]     = baselines[i] + alpha * diff
                     baseline_stds[i] = np.sqrt((1 - alpha) * baseline_stds[i]**2 + alpha * diff**2)
@@ -138,8 +139,15 @@ async def run_simulation(config: dict, progress_cb=None) -> dict:
                     drift_counts[i] += 1
                     dt_idx = DRIFT_TYPES.index(drift_evt["type"])
                     drift_type_counts[i, dt_idx] += 1
-                    # Fitness penalty scales with drift score
                     fitness[i] *= max(0.05, 1.0 - drift_evt["score"] * 0.18)
+
+                # Direct stress-sensitivity fitness pressure in high-stress cultures:
+                # stress_sensitivity is the strongest genome predictor of fitness (KL=35.667),
+                # so make that selection force explicit rather than purely drift-mediated.
+                culture_stress = cultures[int(culture_ids[i])]["ambient_stress"]
+                if culture_stress > 0.5:
+                    stress_trait = float(genomes[i, 2])  # stress_sensitivity
+                    fitness[i] *= max(0.05, 1.0 - stress_trait * culture_stress * 0.12)
 
                 urgency_scores[i] = urgency
                 if urgency >= 70 and urgency_at_alert[i] < 0:
@@ -268,7 +276,7 @@ async def _agent_generation(
                     if dr is not None:
                         drift_result = dr
 
-        # Internal fallback drift scoring
+        # Internal fallback drift scoring — require 4 baseline sessions before activating
         if drift_result is None and baseline is not None:
             drift_result = score_drift(all_metrics, baseline, baseline_std)
 

@@ -52,8 +52,8 @@ def score_drift(
     scores = {
         "cognitive_overload":       (sig(DUR,1)*1.2 + sig(BSP,1)*1.0 + sig(HES,1)*1.5
                                      + sig(CIM,1)*0.8 + sig(TYP,-1)*0.8) / 5.3,
-        "disengagement":            (sig(DUR,-1)*1.0 + sig(IDL,-1)*1.2 + sig(APM,-1)*1.0
-                                     + sig(HES,-1)*0.8) / 4.0,
+        "disengagement":            (sig(DUR,-1)*1.0 + sig(IDL,1)*1.5 + sig(APM,-1)*1.0
+                                     + sig(HES,1)*0.8) / 4.3,
         "unusual_urgency":          (sig(APM,1)*1.5 + sig(CLK,1)*1.2 + sig(HES,-1)*1.0
                                      + sig(DUR,-1)*0.8) / 4.5,
         "context_switch_fatigue":   (sig(NAV,1)*1.5 + sig(RPT,1)*1.0 + sig(HES,1)*0.8) / 3.3,
