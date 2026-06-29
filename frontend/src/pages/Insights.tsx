@@ -1,4 +1,4 @@
-import type { SimResult, PCAPoint, InsightCard } from "../api";
+import type { SimResult, PCAPoint, InsightCard, DriftBaselineResult, HorizonBaselineResult } from "../api";
 import { cultureColor, driftColor, fmt, severityColor } from "../hooks";
 import { TRAITS, DRIFT_TYPES } from "../constants";
 
@@ -188,6 +188,14 @@ export default function Insights({ sim }: Props) {
           ))}
         </div>
       )}
+
+      {sim.result?.baselines && (
+        <ValidationBaselines
+          drift={sim.result.baselines.drift}
+          horizon={sim.result.baselines.horizon}
+          testMode={sim.result.test_mode}
+        />
+      )}
     </div>
   );
 }
@@ -205,6 +213,119 @@ function InsightCardEl({ card }: { card: InsightCard }) {
       }}>
         {card.stat}
       </span>
+    </div>
+  );
+}
+
+function ValidationBaselines({
+  drift, horizon, testMode,
+}: {
+  drift: DriftBaselineResult[] | null | undefined;
+  horizon: HorizonBaselineResult[] | null | undefined;
+  testMode?: string;
+}) {
+  if (!drift && !horizon) return null;
+  const modeLabel: Record<string, string> = {
+    full: "Full", drift_only: "Drift only", horizon_only: "Horizon only",
+    internal_only: "Internal only", comparison: "Comparison",
+  };
+  return (
+    <div className="card" style={{ marginTop: 20 }}>
+      <div className="card-title">
+        Validation Baselines
+        {testMode && (
+          <span style={{ fontWeight: 400, fontSize: 11, color: "var(--muted)", marginLeft: 8 }}>
+            mode: {modeLabel[testMode] ?? testMode}
+          </span>
+        )}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12 }}>
+        Synthetic agents with known expected outcomes — measures whether external models agree with the internal reference scorer.
+      </div>
+
+      {drift && drift.length > 0 && (
+        <>
+          <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6 }}>Behavioral-Drift</div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 16 }}>
+            <thead>
+              <tr style={{ color: "var(--muted)", textAlign: "left" }}>
+                <th style={{ paddingBottom: 6 }}>Scenario</th>
+                <th>Expected</th>
+                <th>Internal</th>
+                <th>External</th>
+                <th>Agreement</th>
+              </tr>
+            </thead>
+            <tbody>
+              {drift.map(r => (
+                <tr key={r.scenario} style={{ borderTop: "1px solid var(--border)" }}>
+                  <td style={{ padding: "5px 0", color: "var(--text)" }}>{r.scenario.replace(/_/g, " ")}</td>
+                  <td style={{ color: "var(--muted)" }}>{r.expected?.replace(/_/g, " ") ?? "—"}</td>
+                  <td>
+                    {r.error ? <span style={{ color: "var(--red)" }}>error</span> : (
+                      <span style={{ color: r.internal?.correct ? "var(--cyan)" : "var(--red)" }}>
+                        {r.internal?.type?.replace(/_/g, " ") ?? "none"}
+                        {r.internal?.score != null && <span style={{ color: "var(--muted)", marginLeft: 4 }}>({r.internal.score})</span>}
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    {r.error ? <span style={{ color: "var(--red)" }}>error</span> : (
+                      <span style={{ color: r.external?.correct ? "var(--cyan)" : "var(--red)" }}>
+                        {r.external?.type?.replace(/_/g, " ") ?? "none"}
+                        {r.external?.score != null && <span style={{ color: "var(--muted)", marginLeft: 4 }}>({r.external.score})</span>}
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    {r.error ? "—" : (
+                      <span style={{ color: r.agreement ? "var(--cyan)" : "var(--amber, #f59e0b)" }}>
+                        {r.agreement ? "agree" : "disagree"}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {horizon && horizon.length > 0 && (
+        <>
+          <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6 }}>Causal-Horizon</div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ color: "var(--muted)", textAlign: "left" }}>
+                <th style={{ paddingBottom: 6 }}>Scenario</th>
+                <th>Lead time</th>
+                <th>Expected range</th>
+                <th>Actual urgency</th>
+                <th>Pass</th>
+              </tr>
+            </thead>
+            <tbody>
+              {horizon.map(r => (
+                <tr key={r.scenario} style={{ borderTop: "1px solid var(--border)" }}>
+                  <td style={{ padding: "5px 0", color: "var(--text)" }}>{r.scenario.replace(/_/g, " ")}</td>
+                  <td style={{ color: "var(--muted)" }}>{r.lead_time_h != null ? `${r.lead_time_h}h` : "—"}</td>
+                  <td style={{ color: "var(--muted)" }}>
+                    {r.expected_urgency_range ? `${r.expected_urgency_range[0]}–${r.expected_urgency_range[1]}` : "—"}
+                  </td>
+                  <td style={{ fontFamily: "monospace" }}>{r.actual_urgency ?? "—"}</td>
+                  <td>
+                    {r.error ? <span style={{ color: "var(--red)" }}>error</span> : (
+                      <span style={{ color: r.in_expected_range ? "var(--cyan)" : "var(--red)" }}>
+                        {r.in_expected_range ? "pass" : "fail"}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </div>
   );
 }

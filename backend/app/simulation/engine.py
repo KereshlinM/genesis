@@ -33,6 +33,7 @@ from app.simulation.genome import (
     N_TRAITS, TRAITS,
     crossover, genome_to_dict, mutate, random_genomes, shannon_diversity,
 )
+from app.simulation.baseline import run_drift_baselines, run_horizon_baselines
 from app.simulation.insights import compute_insights
 from app.simulation.network import (
     apply_social_influence, build_small_world, clustering_coefficient, edge_list,
@@ -59,6 +60,15 @@ async def run_simulation(config: dict, progress_cb=None) -> dict:
     horiz_url = config.get("horizon_api_url", "")
     horiz_key = config.get("horizon_api_key", "")
 
+    test_mode     = config.get("test_mode", "full")
+    in_comparison = test_mode == "comparison"
+    if test_mode == "internal_only":
+        drift_url = drift_key = horiz_url = horiz_key = ""
+    elif test_mode == "drift_only":
+        horiz_url = horiz_key = ""
+    elif test_mode == "horizon_only":
+        drift_url = drift_key = ""
+
     # ---- Initialise ----
     cultures     = init_cultures(n_cultures, rng)
     genomes      = random_genomes(n_pop, rng)
@@ -82,9 +92,19 @@ async def run_simulation(config: dict, progress_cb=None) -> dict:
     generations: list[dict] = []
 
     async with httpx.AsyncClient(timeout=8.0) as client:
+        # Run baseline validation tests in parallel before the generation loop
+        drift_baselines, horizon_baselines = await asyncio.gather(
+            run_drift_baselines(client,  drift_url, drift_key,  config["sim_id"]),
+            run_horizon_baselines(client, horiz_url, horiz_key, config["sim_id"]),
+        )
+
         for gen_idx in range(n_gen):
             gen_drift_events: list[dict | None] = []
-            gen_api_calls = {"drift_sessions": 0, "horizon_observes": 0, "failures": 0}
+            gen_api_calls = {
+                "drift_sessions": 0, "horizon_observes": 0, "failures": 0,
+                "drift_cmp_agree": 0, "drift_cmp_mismatch": 0,
+                "drift_cmp_ext_only": 0, "drift_cmp_int_only": 0, "drift_cmp_neither": 0,
+            }
             time_pressure = gen_idx / max(1, n_gen - 1)  # ramps 0→1 over generations
 
             # Decide which agents face lifecycle events this generation
@@ -112,6 +132,7 @@ async def run_simulation(config: dict, progress_cb=None) -> dict:
                     has_horizon_event=bool(horizon_mask[i]),
                     window_hours=HORIZON_WINDOW_H,
                     sem=sem,
+                    in_comparison=in_comparison,
                 )
                 for i in range(n_pop)
             ]
@@ -138,7 +159,6 @@ async def run_simulation(config: dict, progress_cb=None) -> dict:
                     drift_counts[i] += 1
                     dt_idx = DRIFT_TYPES.index(drift_evt["type"])
                     drift_type_counts[i, dt_idx] += 1
-                    # Fitness penalty scales with drift score
                     fitness[i] *= max(0.05, 1.0 - drift_evt["score"] * 0.18)
 
                 urgency_scores[i] = urgency
@@ -149,6 +169,10 @@ async def run_simulation(config: dict, progress_cb=None) -> dict:
                 gen_api_calls["drift_sessions"]  += res.get("api_drift", 0)
                 gen_api_calls["horizon_observes"] += res.get("api_horizon", 0)
                 gen_api_calls["failures"]         += res.get("api_failures", 0)
+
+                cmp = res.get("cmp_outcome")
+                if cmp in ("agree", "mismatch", "ext_only", "int_only", "neither"):
+                    gen_api_calls[f"drift_cmp_{cmp}"] += 1
 
             # ---- Generation stats ----
             drift_this_gen = sum(1 for d in gen_drift_events if d)
@@ -236,6 +260,8 @@ async def run_simulation(config: dict, progress_cb=None) -> dict:
         },
         "cultures": cultures,
         "insights": insights,
+        "baselines": {"drift": drift_baselines, "horizon": horizon_baselines},
+        "test_mode": test_mode,
     }
 
 
@@ -243,7 +269,8 @@ async def _agent_generation(
     agent_idx, genome, culture, baseline, baseline_std,
     sessions, time_pressure, rng,
     client, drift_url, drift_key, horiz_url, horiz_key,
-    sim_id, gen_idx, has_horizon_event, window_hours, sem
+    sim_id, gen_idx, has_horizon_event, window_hours, sem,
+    in_comparison: bool = False,
 ) -> dict:
     async with sem:
         all_metrics = np.zeros(N_METRICS, dtype=np.float32)
@@ -251,24 +278,52 @@ async def _agent_generation(
         api_drift = api_horizon = api_failures = 0
         lead_time_h = None
         urgency_score = 0.0
+        last_metrics = None
+        external_api_ok = False
 
         for s_idx in range(sessions):
             tp = time_pressure if s_idx == sessions - 1 else 0.0
             metrics = generate_metrics(genome, culture, rng, time_pressure=tp)
             all_metrics += metrics / sessions
+            if s_idx == sessions - 1:
+                last_metrics = metrics
 
-            # Drift scoring
+            # Drift scoring via external API
             if drift_url and drift_key and s_idx == sessions - 1:
                 dr = await _call_drift_api(client, drift_url, drift_key,
                                            agent_idx, sim_id, gen_idx, metrics, rng)
-                if dr is not None:
-                    drift_result = dr
-                    api_drift = 1
-                else:
+                if dr is False:
                     api_failures += 1
+                else:
+                    external_api_ok = True
+                    api_drift = 1
+                    if dr is not None:
+                        drift_result = dr
 
-        # Internal fallback drift scoring
-        if drift_result is None and baseline is not None:
+        # Comparison mode: run internal scorer on the same last-session metrics the API saw,
+        # record agreement/disagreement, and let internal drive simulation fitness.
+        cmp_outcome = None
+        if in_comparison and external_api_ok and last_metrics is not None and baseline is not None:
+            internal = score_drift(last_metrics, baseline, baseline_std)
+            i_type = internal["type"] if internal else None
+            e_type = drift_result["type"] if drift_result else None
+            if i_type and e_type:
+                cmp_outcome = "agree" if i_type == e_type else "mismatch"
+            elif e_type:
+                cmp_outcome = "ext_only"
+            elif i_type:
+                cmp_outcome = "int_only"
+            else:
+                cmp_outcome = "neither"
+            # Internal scorer is the reference — it drives simulation fitness in comparison mode
+            drift_result = internal
+
+        elif in_comparison and last_metrics is not None and baseline is not None:
+            # External unavailable: still use internal as reference
+            drift_result = score_drift(last_metrics, baseline, baseline_std)
+
+        elif drift_result is None and baseline is not None:
+            # Normal fallback: external not called or failed
             drift_result = score_drift(all_metrics, baseline, baseline_std)
 
         # Causal horizon
@@ -285,7 +340,6 @@ async def _agent_generation(
                 api_failures += 1
 
         if urgency_score == 0.0:
-            # Internal urgency approximation based on time_pressure
             urgency_score = float(time_pressure * 60 + (drift_result["score"] * 5 if drift_result else 0))
             urgency_score = min(100.0, urgency_score)
 
@@ -297,6 +351,7 @@ async def _agent_generation(
             "api_drift": api_drift,
             "api_horizon": api_horizon,
             "api_failures": api_failures,
+            "cmp_outcome": cmp_outcome,
         }
 
 
@@ -304,11 +359,11 @@ async def _call_drift_api(client, base_url, api_key, agent_idx, sim_id, gen_idx,
     headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
     user_id = f"genesis-{sim_id}-a{agent_idx}"
     try:
-        r = await client.post(f"{base_url}/api/v1/sessions/start",
-                              json={"external_id": user_id, "context": f"gen-{gen_idx}"},
+        r = await client.post(f"{base_url}/api/v1/sessions",
+                              json={"user_id": user_id, "context": f"gen-{gen_idx}"},
                               headers=headers)
         if r.status_code not in (200, 201):
-            return None
+            return False
         session_id = r.json()["id"]
 
         events = generate_raw_events(metrics, rng)
@@ -317,7 +372,7 @@ async def _call_drift_api(client, base_url, api_key, agent_idx, sim_id, gen_idx,
 
         r2 = await client.post(f"{base_url}/api/v1/sessions/{session_id}/end", headers=headers)
         if r2.status_code not in (200, 201):
-            return None
+            return False
         body = r2.json()
         if body.get("drift"):
             d = body["drift"]
@@ -330,7 +385,7 @@ async def _call_drift_api(client, base_url, api_key, agent_idx, sim_id, gen_idx,
             }
         return None
     except Exception:
-        return None
+        return False
 
 
 async def _call_horizon_api(client, base_url, api_key, agent_idx, sim_id, gen_idx,

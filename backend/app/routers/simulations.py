@@ -39,6 +39,7 @@ class SimulationCreate(BaseModel):
     drift_api_key: str = Field(default="")
     horizon_api_url: str = Field(default="")
     horizon_api_key: str = Field(default="")
+    test_mode: str = Field(default="full", pattern="^(full|drift_only|horizon_only|internal_only|comparison)$")
     seed: int | None = None
 
 
@@ -59,6 +60,7 @@ async def create_simulation(
         "drift_api_key":  body.drift_api_key  or settings.drift_api_key,
         "horizon_api_url": body.horizon_api_url or settings.horizon_api_url,
         "horizon_api_key": body.horizon_api_key or settings.horizon_api_key,
+        "test_mode": body.test_mode,
         "sim_id": sim_id,
     }
     if body.population_size  is not None: config["population_size"]  = body.population_size

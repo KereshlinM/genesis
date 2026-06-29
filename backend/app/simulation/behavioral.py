@@ -57,10 +57,10 @@ def generate_metrics(genome: np.ndarray, culture: dict, rng: np.random.Generator
         0.025 + 0.14 * eff_stress,                                # backspace_rate
         0.07 + 0.28 * eff_stress * (1 - adaptability * 0.5),    # hesitation_rate
         max(0, 400 * eff_pace + 50),                              # scroll_velocity
-        0.025 + 0.09 * novelty + 0.06 * eff_stress,             # nav_back_rate
-        max(0, 0.25 * (1 - eff_pace) * (1 + eff_stress * 0.2)), # idle_ratio
-        0.02 + 0.09 * eff_stress + 0.04 * (1 - adaptability),  # repeated_click_ratio
-        max(30, 160 + 280 * attention * (1 - 0.25 * eff_stress)), # session_duration_s
+        0.025 + 0.09 * novelty + 0.06 * eff_stress,                    # nav_back_rate
+        max(0, 0.25 * (1 - eff_pace) * (1 + eff_stress * 0.2)),         # idle_ratio
+        0.02 + 0.09 * eff_stress + 0.04 * (1 - adaptability),           # repeated_click_ratio
+        max(30, 160 + 280 * attention * (1 - 0.25 * eff_stress)),        # session_duration_s
     ], dtype=np.float32)
 
     noise_sd = np.array([5, 0.05, 60, 7, 0.01, 0.02, 40, 0.01, 0.02, 0.01, 25], dtype=np.float32)

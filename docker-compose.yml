@@ -7,11 +7,11 @@ services:
       - "8001:8000"
     environment:
       DATABASE_URL: "sqlite+aiosqlite:///./genesis.db"
-      CORS_ORIGINS: '["http://localhost:5173","http://localhost:4173"]'
-      DRIFT_API_URL: ""
-      DRIFT_API_KEY: ""
-      HORIZON_API_URL: ""
-      HORIZON_API_KEY: ""
+      CORS_ORIGINS: "http://localhost:5175,http://localhost:4173"
+      DRIFT_API_URL: "http://host.docker.internal:8003"
+      DRIFT_API_KEY: "dk_XFNuYuX38EncMDLB97K84YwXlGE9n-V8qzLp_HLs2W0"
+      HORIZON_API_URL: "http://host.docker.internal:8002"
+      HORIZON_API_KEY: "ch_WnsQS7AE3gcxVyt6MACTbcFJqr5eAKbaP0FXLk5cQQA"
     volumes:
       - ./backend:/app
 
@@ -21,7 +21,7 @@ services:
     volumes:
       - ./frontend:/app
     ports:
-      - "5173:5173"
+      - "5175:5173"
     command: sh -c "npm install && npm run dev -- --host"
     environment:
       VITE_API_URL: "http://localhost:8001"

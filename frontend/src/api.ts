@@ -12,6 +12,7 @@ export interface SimConfig {
   drift_api_key?: string;
   horizon_api_url?: string;
   horizon_api_key?: string;
+  test_mode?: "full" | "drift_only" | "horizon_only" | "internal_only" | "comparison";
   seed?: number;
 }
 
@@ -46,7 +47,16 @@ export interface GenerationStats {
     ambient_stress: number;
     tech_fluency: number;
   }>;
-  api_calls: { drift_sessions: number; horizon_observes: number; failures: number };
+  api_calls: {
+    drift_sessions: number;
+    horizon_observes: number;
+    failures: number;
+    drift_cmp_agree?: number;
+    drift_cmp_mismatch?: number;
+    drift_cmp_ext_only?: number;
+    drift_cmp_int_only?: number;
+    drift_cmp_neither?: number;
+  };
 }
 
 export interface Agent {
@@ -81,6 +91,26 @@ export interface InsightCard {
   drift_type?: string;
 }
 
+export interface DriftBaselineResult {
+  scenario: string;
+  description?: string;
+  expected: string;
+  internal: { type: string | null; score: number | null; correct: boolean };
+  external: { type: string | null; score: number | null; correct: boolean };
+  agreement: boolean;
+  error?: string;
+}
+
+export interface HorizonBaselineResult {
+  scenario: string;
+  elapsed_fraction: number;
+  lead_time_h: number;
+  expected_urgency_range: [number, number];
+  actual_urgency: number;
+  in_expected_range: boolean;
+  error?: string;
+}
+
 export interface SimResult {
   id: string;
   name: string;
@@ -101,6 +131,11 @@ export interface SimResult {
       signal_effectiveness: Array<{ trait: string; r_urgency: number; p_urgency: number }>;
       trait_drift_correlations: Record<string, Record<string, { r: number; p: number }>>;
     };
+    baselines?: {
+      drift: DriftBaselineResult[] | null;
+      horizon: HorizonBaselineResult[] | null;
+    };
+    test_mode?: string;
   } | null;
 }
 
