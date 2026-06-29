@@ -14,7 +14,7 @@ def _now() -> datetime:
 class SimulationRun(Base):
     __tablename__ = "simulation_runs"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    id: Mapped[str] = mapped_column(String(8), primary_key=True)
     name: Mapped[str] = mapped_column(String(128))
     config: Mapped[dict[str, Any]] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|running|completed|failed

@@ -261,11 +261,12 @@ async def _agent_generation(
             if drift_url and drift_key and s_idx == sessions - 1:
                 dr = await _call_drift_api(client, drift_url, drift_key,
                                            agent_idx, sim_id, gen_idx, metrics, rng)
-                if dr is not None:
-                    drift_result = dr
-                    api_drift = 1
-                else:
+                if dr is False:
                     api_failures += 1
+                else:
+                    api_drift = 1
+                    if dr is not None:
+                        drift_result = dr
 
         # Internal fallback drift scoring
         if drift_result is None and baseline is not None:
@@ -304,11 +305,11 @@ async def _call_drift_api(client, base_url, api_key, agent_idx, sim_id, gen_idx,
     headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
     user_id = f"genesis-{sim_id}-a{agent_idx}"
     try:
-        r = await client.post(f"{base_url}/api/v1/sessions/start",
-                              json={"external_id": user_id, "context": f"gen-{gen_idx}"},
+        r = await client.post(f"{base_url}/api/v1/sessions",
+                              json={"user_id": user_id, "context": f"gen-{gen_idx}"},
                               headers=headers)
         if r.status_code not in (200, 201):
-            return None
+            return False
         session_id = r.json()["id"]
 
         events = generate_raw_events(metrics, rng)
@@ -317,7 +318,7 @@ async def _call_drift_api(client, base_url, api_key, agent_idx, sim_id, gen_idx,
 
         r2 = await client.post(f"{base_url}/api/v1/sessions/{session_id}/end", headers=headers)
         if r2.status_code not in (200, 201):
-            return None
+            return False
         body = r2.json()
         if body.get("drift"):
             d = body["drift"]
@@ -330,7 +331,7 @@ async def _call_drift_api(client, base_url, api_key, agent_idx, sim_id, gen_idx,
             }
         return None
     except Exception:
-        return None
+        return False
 
 
 async def _call_horizon_api(client, base_url, api_key, agent_idx, sim_id, gen_idx,
