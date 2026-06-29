@@ -45,6 +45,8 @@ def compute_insights(
                 trait_drift_corr[trait][dt] = {"r": 0.0, "p": 1.0}
                 continue
             r, p = stats.pearsonr(trait_vals, drift_indicator)
+            r = 0.0 if math.isnan(r) else r
+            p = 1.0 if math.isnan(p) else p
             trait_drift_corr[trait][dt] = {"r": round(float(r), 3), "p": round(float(p), 4)}
 
     # ---- 2. One-way ANOVA across cultures ----
@@ -55,6 +57,8 @@ def compute_insights(
     }
     if len(culture_groups) > 1:
         f_stat, anova_p = stats.f_oneway(*culture_groups.values())
+        if math.isnan(f_stat): f_stat = 0.0
+        if math.isnan(anova_p): anova_p = 1.0
     else:
         f_stat, anova_p = 0.0, 1.0
 
@@ -69,6 +73,9 @@ def compute_insights(
     eigenvectors = eigenvectors[:, order]
     pcs = g_scaled @ eigenvectors[:, :2]
     var_exp = eigenvalues[:2] / (eigenvalues.sum() + 1e-9)
+
+    pcs = np.nan_to_num(pcs)
+    var_exp = np.nan_to_num(var_exp)
 
     pca_points = [
         {
@@ -125,6 +132,7 @@ def compute_insights(
         if urgency_vals.std() < 1e-6:
             continue
         r, p = stats.pearsonr(trait_vals, urgency_vals)
+        if math.isnan(r): continue
         signal_effectiveness.append({
             "trait": trait,
             "r_urgency": round(float(r), 3),
